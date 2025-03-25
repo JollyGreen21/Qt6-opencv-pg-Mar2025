@@ -1,11 +1,15 @@
+import sys
+sys.path.append("opencv_pg/models/base_transform.py")
+
 import logging
 import traceback
 
 import numpy as np
 import copy
 
-from qtpy import QtCore
+from PySide6 import QtCore
 
+# Fix the import to use relative import instead of direct path
 from .params import Param
 
 log = logging.getLogger(__name__)
@@ -234,6 +238,9 @@ class BaseTransform(metaclass=DeclarativeFieldBase):
         except Exception as e:
             log.exception(e)
             self.error = traceback.format_exc()
+            # Make sure we return a valid image and extra_out
+            if img_out is None or len(img_out.shape) == 0:
+                img_out = np.zeros((100, 100, 3), dtype=np.uint8)  # Create a small black image
 
         return img_out, extra_out
 
@@ -281,3 +288,8 @@ class BaseTransform(metaclass=DeclarativeFieldBase):
         # without specfying how.
         """
         pass
+
+    def reset_params(self):
+        """Resets the transform's parameters to their default values"""
+        for name, value in self._params:
+            setattr(self, name, value.default)

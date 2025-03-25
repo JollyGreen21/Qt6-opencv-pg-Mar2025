@@ -1,11 +1,11 @@
 import logging
 
 from .pipeline import Window
-from . import support_transforms as supt
-from . import transforms as tf
+from .import support_transforms as supt
+from .import transforms as tf
 from .base_transform import BaseTransform
 
-from opencv_pg.docs.doc_writer import render_local_doc, RENDERED_DIR
+from docs.doc_writer import render_local_doc, RENDERED_DIR
 
 log = logging.getLogger(__name__)
 
@@ -130,9 +130,19 @@ def get_transform_window(transform, img_path):
     if transforms is None:
         log.error("Can't find transform %s", transforms)
 
+    # Handle image path
     loader = None
     if transforms[0] is _LOADER_CLASS:
-        loader = _LOADER_CLASS(img_path)
+        if not img_path:
+            log.warning("No image path provided, using blank image fallback")
+            # Use BlankCanvas as fallback when image path is None or empty
+            loader = supt.BlankCanvas()
+        else:
+            try:
+                loader = _LOADER_CLASS(img_path)
+            except FileNotFoundError:
+                log.warning(f"Image not found at {img_path}, using blank image fallback")
+                loader = supt.BlankCanvas()
 
     if loader is None:
         trans_inst = [x if isinstance(x, BaseTransform) else x() for x in transforms]

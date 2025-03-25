@@ -75,6 +75,7 @@ LINES = {
     "4-Connected": cv2.LINE_4,
     "FILLED": cv2.FILLED,
     "Anti Aliased": cv2.LINE_AA,
+    8: cv2.LINE_8  # Add this line to map the key 8 to cv2.LINE_8
 }
 
 

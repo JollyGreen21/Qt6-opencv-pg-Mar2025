@@ -1,6 +1,7 @@
 import logging
 
-from qtpy import QtCore, QtWidgets
+from PySide6 import QtCore, QtWidgets
+from utils.config_manager import config
 
 log = logging.getLogger(__name__)
 
@@ -8,11 +9,10 @@ log = logging.getLogger(__name__)
 class ImageViewer(QtWidgets.QGraphicsView):
     def __init__(self, parent=None):
         super().__init__(parent=parent)
-        # Disable this new qt.pointer.dispatch: skipping QEventPoint warning
-        # Seems to affect trackpads
-        # https://bugreports.qt.io/browse/QTBUG-103935?focusedCommentId=670393
+        # Use config setting for touch events
         self.viewport().setAttribute(
-            QtCore.Qt.WidgetAttribute.WA_AcceptTouchEvents, False
+            QtCore.Qt.WidgetAttribute.WA_AcceptTouchEvents, 
+            config.is_touch_events_enabled()
         )
         self.setDragMode(self.DragMode.ScrollHandDrag)
         self.setTransformationAnchor(self.ViewportAnchor.AnchorViewCenter)
@@ -23,7 +23,7 @@ class ImageViewer(QtWidgets.QGraphicsView):
         self._scene.addItem(self._img)
         self.setScene(self._scene)
 
-        self._base_zoom_fac = 0.002
+        self._base_zoom_fac = config.get('ImageViewer', 'base_zoom_factor', 0.002, float)
 
         self._first_time_set = False
         self._current_rect = None

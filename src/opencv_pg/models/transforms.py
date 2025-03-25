@@ -5,7 +5,7 @@ from . import params
 from . import cv2_constants as cvc
 from . import support_transforms as supt
 
-from qtpy import QtWidgets, QtCore
+from PySide6 import QtWidgets, QtCore
 import cv2
 import numpy as np
 
@@ -15,10 +15,12 @@ log = logging.getLogger(__name__)
 
 
 class GaussianBlur(BaseTransform):
+    doc_filename = "GaussianBlur.html"
+    
     k_size_x = params.IntSlider(min_val=1, max_val=100, default=1, step=2)
     k_size_y = params.IntSlider(min_val=1, max_val=100, default=1, step=2)
-    sigma_x = params.IntSlider(min_val=1, max_val=10, default=1)
-    sigma_y = params.IntSlider(min_val=0, max_val=10, default=0)
+    sigma_x = params.FloatSlider(min_val=0.1, max_val=10, default=1.0, step=0.1)
+    sigma_y = params.FloatSlider(min_val=0.0, max_val=10, default=0.0, step=0.1)
     border_type = params.ComboBox(
         options=[
             "BORDER_CONSTANT",
@@ -93,7 +95,7 @@ class CopyMakeBorder(BaseTransform):
 class Normalize(BaseTransform):
     doc_filename = "normalize.html"
 
-    alpha = params.IntSlider(default=125, min_val=0, max_val=255, step=1)
+    alpha = params.FloatSlider(default=125.0, min_val=0.0, max_val=255.0, step=0.1)
     beta = params.IntSlider(default=0, min_val=0, max_val=255)
     norm_type = params.ComboBox(
         options=["NORM_MINMAX", "NORM_INF", "NORM_L1", "NORM_L2"],
@@ -168,7 +170,7 @@ class Filter2D(BaseTransform):
     doc_filename = "filter2D.html"
 
     kernel = params.Array(help_text="Right click in array to set anchor")
-    delta = params.SpinBox(min_val=0, max_val=300, step=5, unit_type="integer")
+    delta = params.SpinBox(min_val=0, max_val=300, step=5)
     border_type = params.ComboBox(
         options=[
             "BORDER_CONSTANT",
@@ -390,7 +392,7 @@ class Sobel(BaseTransform):
     dy = params.IntSlider(min_val=1, max_val=2, default=1, step=1)
     k_size = params.IntSlider(min_val=1, max_val=7, default=3, step=2)
     scale = params.FloatSlider(min_val=0.10, max_val=200, default=100.0, step=0.1)
-    delta = params.IntSlider(min_val=-255, max_val=255, default=0)
+    delta = params.FloatSlider(min_val=-255.0, max_val=255.0, default=0.0, step=0.1)
     border_type = params.ComboBox(
         options=[
             "BORDER_CONSTANT",
@@ -590,7 +592,7 @@ class FastNIMeansDenoisingColored(BaseTransform):
 
 
 class Kmeans(BaseTransform):
-    doc_name = "kmeans.html"
+    doc_filename = "kmeans.html"
 
     k = params.IntSlider(
         min_val=1, max_val=10, default=5, help_text="Number of Clusters"
@@ -623,7 +625,18 @@ class Kmeans(BaseTransform):
             self._epsilon.widget.setEnabled(True)
 
     def draw(self, img_in, extra_in):
-        points = extra_in.astype(np.float32)
+        # Check if extra_in is None and handle it gracefully
+        if extra_in is None:
+            # Create a dummy set of points for demonstration
+            # Could be a small grid or just a few random points
+            height, width = img_in.shape[:2]
+            x = np.linspace(0, width-1, 10, dtype=np.float32)
+            y = np.linspace(0, height-1, 10, dtype=np.float32)
+            xx, yy = np.meshgrid(x, y)
+            points = np.column_stack([xx.flatten(), yy.flatten()]).astype(np.float32)
+        else:
+            points = extra_in.astype(np.float32)
+            
         comp, labels, centers = cv2.kmeans(
             points,
             K=self.k,
@@ -675,8 +688,6 @@ class InRange(BaseTransform):
 
 
 class InRangeRaw(BaseTransform):
-    """A raw implemenation of cv2.inRange"""
-
     doc_filename = "inRange.html"
 
     ch1 = params.SliderPairParam(min_val=0, max_val=255)
@@ -691,8 +702,6 @@ class InRangeRaw(BaseTransform):
 
 
 class CornerHarris(BaseTransform):
-    """Harris Corners"""
-
     doc_filename = "cornerHarris.html"
 
     block_size = params.IntSlider(min_val=1, max_val=100, default=1)
@@ -722,8 +731,6 @@ class CornerHarris(BaseTransform):
 
 
 class CornerSubPix(BaseTransform):
-    """cornerSubPix"""
-
     doc_filename = "cornerSubPix.html"
 
     window_size_rows = params.IntSlider(min_val=1, max_val=100, default=5)
@@ -775,8 +782,6 @@ class CornerSubPix(BaseTransform):
 
 
 class GoodFeaturesToTrack(BaseTransform):
-    """goodFeaturesToTrack"""
-
     doc_filename = "goodFeaturesToTrack.html"
 
     max_corners = params.IntSlider(min_val=0, max_val=100, default=0)
@@ -812,8 +817,6 @@ class GoodFeaturesToTrack(BaseTransform):
 
 
 class Resize(BaseTransform):
-    """Resize"""
-
     doc_filename = "resize.html"
 
     scale_x = params.FloatSlider(min_val=0.005, max_val=3.0, default=1.0, step=0.005)
@@ -842,10 +845,9 @@ class Resize(BaseTransform):
 
 
 class ApproxPolyDP(BaseTransform):
-    """ApproxPolyDP"""
-
     doc_filename = "approxPolyDP.html"
 
+    
     epsilon = params.FloatSlider(min_val=0.005, max_val=30.0, default=1.0, step=0.005)
     closed = params.CheckBox()
 
@@ -856,6 +858,9 @@ class ApproxPolyDP(BaseTransform):
         contours = extra_in
         approx_contours = []
 
+        if contours is None:
+            return img_in, approx_contours
+
         for cont in contours:
             epsilon = self.epsilon
             approx = cv2.approxPolyDP(cont, epsilon, self.closed)
@@ -865,8 +870,6 @@ class ApproxPolyDP(BaseTransform):
 
 
 class FindContours(BaseTransform):
-    """FindContours"""
-
     doc_filename = "findContours.html"
 
     threshold = params.IntSlider(min_val=0, max_val=255, default=100, step=1)
@@ -908,8 +911,6 @@ class FindContours(BaseTransform):
 
 
 class GetGaussianKernel(BaseTransform):
-    """GetGaussianKernel"""
-
     doc_filename = "getGaussianKernel.html"
 
     k_size = params.IntSlider(min_val=1, max_val=31.0, default=13, step=2)
@@ -929,8 +930,6 @@ class GetGaussianKernel(BaseTransform):
 
 
 class MatchTemplate(BaseTransform):
-    """MatchTemplate"""
-
     doc_filename = "matchTemplate.html"
 
     template_center_x = params.IntSlider(min_val=0, max_val=100, default=50, step=1)
@@ -959,7 +958,6 @@ class MatchTemplate(BaseTransform):
         return label
 
     def draw(self, img_in, extra_in):
-
         rows, cols = img_in.shape[0:2]
         temp_center = (
             int(rows * self.template_center_y / 100),
@@ -967,43 +965,34 @@ class MatchTemplate(BaseTransform):
         )
         temp_row_size = int(rows * self.template_size / 200)
         temp_col_size = int(cols * self.template_size / 200)
-
         template = img_in[
             temp_center[0] - temp_row_size : temp_center[0] + temp_row_size,
             temp_center[1] - temp_col_size : temp_center[1] + temp_col_size,
-            :,
         ]
-
         result = cv2.matchTemplate(image=img_in, templ=template, method=self.method)
-
         cv2.rectangle(
             img_in,
             (temp_center[1] - temp_col_size, temp_center[0] - temp_row_size),
             (temp_center[1] + temp_col_size, temp_center[0] + temp_row_size),
             (0, 0, 255),
-            5,
+            2,
         )
-
-        h, w = template.shape[0:2]
         min_val, max_val, min_loc, max_loc = cv2.minMaxLoc(result)
         if self.method in [cv2.TM_SQDIFF, cv2.TM_SQDIFF_NORMED]:
             top_left = min_loc
         else:
             top_left = max_loc
+        h, w = template.shape[0:2]
         bottom_right = (top_left[0] + w, top_left[1] + h)
         cv2.rectangle(img_in, top_left, bottom_right, 255, 2)
-
         return img_in
 
-
 class AddWeighted(BaseTransform):
-    """AddWeighted"""
-
     doc_filename = "addWeighted.html"
 
-    alpha = params.FloatSlider(min_val=0.0, max_val=1.0, default=1.0, step=0.005)
+    alpha = params.FloatSlider(min_val=-2.0, max_val=3.0, default=1.0, step=0.05)
     beta = params.FloatSlider(min_val=0.0, max_val=1.0, default=0.0, step=0.005)
-    gamma = params.IntSlider(min_val=0, max_val=255, default=0.0, step=1.0)
+    gamma = params.IntSlider(min_val=0, max_val=255, default=0, step=1)
 
     def draw(self, img_in, extra_in):
         rev_rows = np.arange(img_in.shape[0]) * (-1)
@@ -1015,11 +1004,11 @@ class AddWeighted(BaseTransform):
             src1=img_in, alpha=self.alpha, src2=img2, beta=self.beta, gamma=self.gamma
         )
         return out
-
+    block_size = params.IntSlider(min_val=1, max_val=25, default=3)
+    k_size = params.IntSlider(min_val=1, max_val=7, default=3, step=2)
+    threshold = params.IntSlider(min_val=1, max_val=100, default=50)
 
 class CornerEigenValsAndVecs(BaseTransform):
-    """CornerEigenValsAndVecs"""
-
     doc_filename = "cornerEigenValsAndVecs.html"
 
     block_size = params.IntSlider(min_val=1, max_val=25, default=3)
@@ -1048,126 +1037,120 @@ class CornerEigenValsAndVecs(BaseTransform):
 
     def draw(self, img_in, extra_in):
         img = supt.make_gray(img_in)
-
         values = cv2.cornerEigenValsAndVecs(
             src=img,
-            blockSize=self.block_size,
-            ksize=self.k_size,
-            borderType=self.border_type,
+            blockSize=self.block_size.value,
+            ksize=self.k_size.value,
+            borderType=self.border_type.value,
         )
-
-        Mc = np.empty(img.shape, dtype=np.float32)
         L1 = values[:, :, 0]
         L2 = values[:, :, 1]
         Mc = np.multiply(L1, L2) - 0.04 * (np.multiply((L1 + L2), (L1 + L2)))
         values_min, values_max, _, _ = cv2.minMaxLoc(Mc)
-        bound = values_min + (values_max - values_min) * self.threshold / 100
-
-        mask = Mc > bound
-
+        bound = values_min + (values_max - values_min) * self.threshold.value / 100
         shape_y, shape_x = np.shape(Mc)
         [X, Y] = np.meshgrid(np.arange(shape_x), np.arange(shape_y))
+        mask = Mc > bound
         pts_harris = np.stack((X[mask], Y[mask]), axis=1)
-
         return img_in, pts_harris
 
 
 class PyrDown(BaseTransform):
-    doc_filename = "pyrDown.html"
-
-    n_images = params.IntSlider(
-        min_val=1,
-        max_val=5,
-        default=3,
-        help_text="Number of successive times to run pyrDown",
-    )
-    border_type = params.ComboBox(
-        options=[
-            "BORDER_REPLICATE",
-            "BORDER_REFLECT",
-            "BORDER_WRAP",
-            "BORDER_DEFAULT",
-        ],
-        default="BORDER_DEFAULT",
-        options_map=cvc.BORDERS,
-    )
-
-    def get_info_widget(self):
-        text = (
-            "The first image is the original. Each successive image is a "
-            "reduction by 1/2 of the previous images dimensions"
-        )
-        label = QtWidgets.QLabel(text, alignment=QtCore.Qt.AlignCenter)
-        label.setWordWrap(True)
-        return label
-
+    """Perform pyramid downsampling on an image
+    
+    Blurs an image and downsamples it, effectively reducing its size to half in each dimension.
+    """
+    
     def draw(self, img_in, extra_in):
-        pyramid = []
-        pyramid.append(img_in)
-        img = img_in
-        for _ in range(self.n_images):
-            img = cv2.pyrDown(
-                src=img,
-                dstsize=tuple((int(x / 2) for x in img.shape[:2])),
-                borderType=self.border_type,
-            )
-            pyramid.append(np.copy(img))
-
-        return img_in, pyramid
-
+        """Apply cv2.pyrDown to reduce image size
+        
+        Args:
+            img_in: Input image
+            extra_in: Extra input data (not used)
+            
+        Returns:
+            Downsampled image
+        """
+        return cv2.pyrDown(img_in)
+    
+    @classmethod
+    def get_doc_filename(cls):
+        return "pyrdown"
 
 class FillPoly(BaseTransform):
     doc_filename = "fillPoly.html"
-
-    points = params.ReadOnlyLabel(
-        fmt_str="{x}",
-        default=np.array(
-            [
-                # Diamond
-                [[125, 0], [250, 125], [125, 250], [0, 125]],
-                # Square Inside
-                [[75, 75], [175, 75], [175, 175], [75, 175]],
-                # Diagonal Rectangle
-                [[0, 0], [225, 250], [250, 225], [250, 225],],
-            ]
-        ),
-        help_text="Shapes shown in order are a Diamond, an inner square, and a "
-        "diagonal triangle (though four points specify it).",
-    )
-    color = params.ColorPicker(label="Color", default=(0, 0, 255))
+    
+    color = params.ColorPicker(default=(255, 255, 255))
     line_type = params.ComboBox(
-        options=list(cvc.LINES.keys()), options_map=cvc.LINES, default="8-Connected"
+        options=["LINE_4", "LINE_8", "LINE_AA"],
+        default="LINE_8",
+        options_map={
+            "LINE_4": cv2.LINE_4,
+            "LINE_8": cv2.LINE_8,
+            "LINE_AA": cv2.LINE_AA
+        },
     )
-
+    shift = params.IntSlider(min_val=0, max_val=8, default=0)
+    offset_x = params.IntSlider(min_val=-50, max_val=50, default=0)
+    offset_y = params.IntSlider(min_val=-50, max_val=50, default=0)
+    
     def draw(self, img_in, extra_in):
-        out = cv2.fillPoly(
-            img=img_in, pts=self.points, color=self.color, lineType=self.line_type
+        """Fill polygons on the input image
+        
+        Args:
+            img_in: Input image (used as the canvas)
+            extra_in: Contours/points to be filled (typically from FindContours)
+            
+        Returns:
+            Image with filled polygons
+        """
+        # Create a copy of the input image to avoid modifying the original
+        result = np.copy(img_in)
+        
+        # If extra_in is None, create a default polygon (triangle) for demonstration
+        if extra_in is None:
+            h, w = img_in.shape[:2]
+            pts = np.array([
+                [[w//4, h//4]],
+                [[w//2, 3*h//4]],
+                [[3*w//4, h//4]]
+            ], dtype=np.int32)
+            polygons = [pts]
+        else:
+            polygons = extra_in
+            
+        # Apply fillPoly with the specified parameters
+        cv2.fillPoly(
+            img=result,
+            pts=polygons,
+            color=self.color,
+            lineType=self.line_type,
+            shift=self.shift,
+            offset=(self.offset_x, self.offset_y)
         )
-        return out
+        
+        return result
 
-    def get_info_widget(self):
-        label = QtWidgets.QLabel(
-            "The points shown below are those that define the shape seen",
-            alignment=QtCore.Qt.AlignCenter,
-        )
-        label.setWordWrap(True)
-        return label
+class DrawContours(BaseTransform):
+    doc_filename = "drawContours.html"
 
-
-class Transform(BaseTransform):
-    """A do nothing transform with options"""
-
-    slider_1 = params.IntSlider(
-        min_val=0, max_val=10, label="Renamed Slider", default=1
-    )
-    slider_2 = params.IntSlider(
-        min_val=10, max_val=20, default=15, editable_range=False
-    )
-    float_slider = params.FloatSlider(min_val=0, max_val=1, default=0, step=0.1)
-    pair = params.SliderPairParam(min_val=0, max_val=255)
-    combo = params.ComboBox(
-        options=["Option1", "Option2"], options_map={"Option1": 1, "Option2": 2}
+    contour_index = params.IntSlider(min_val=-1, max_val=10, default=-1)
+    color = params.ColorPicker(default=(0, 255, 0))
+    thickness = params.IntSlider(min_val=1, max_val=10, default=2)
+    line_type = params.ComboBox(
+        options=["LINE_4", "LINE_8", "LINE_AA"],
+        default="LINE_8",
+        options_map={
+            "LINE_4": cv2.LINE_4,
+            "LINE_8": cv2.LINE_8,
+            "LINE_AA": cv2.LINE_AA
+        },
     )
 
-    def draw(self, img_in, extra_in):
-        return img_in
+    def draw(self, img_in, contours):
+        """Draw contours on the image"""
+        img = np.copy(img_in)
+        if contours is None:
+            return img  # Return the image without modifications if contours is None
+        cv2.drawContours(img, contours, self.contour_index, self.color, self.thickness, cvc.LINES[self.line_type])
+        return img

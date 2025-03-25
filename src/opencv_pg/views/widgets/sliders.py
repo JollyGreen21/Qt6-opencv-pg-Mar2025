@@ -1,109 +1,59 @@
 import logging
 
-from qtpy import QtCore, QtGui, QtWidgets
-from qtpy.QtWidgets import QStyle
+from PySide6 import QtCore, QtGui, QtWidgets
+from PySide6.QtWidgets import QStyle
+from utils.config_manager import config
 
 log = logging.getLogger(__name__)
 
 
 class DoubleSlider(QtWidgets.QSlider):
-    """A Slider that increments based on the `interval`
+    # The slider class manages value scaling between int and float
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._scale_factor = config.get_float_scale_factor()
+        self._interval = config.get_default_interval()
 
-    Adapted from here: https://stackoverflow.com/a/61439114/6237583
-
-    NOTE: This slider emits the index, not the underlying value which is likely
-    what we want to emit
-    """
-
-    def __init__(self, *args, **kargs):
-        super().__init__(*args, **kargs)
-        self._min = 0
-        self._max = 99
-        self.interval = 1
-
-        # Subclasses use this to connect to their _handle_changed, which
-        # re-emits the underlying self.value() as appropriate type
-        self.valueChanged.connect(self._handle_changed)
-        self.sliderPressed.connect(self._handle_slider_pressed)
-
-        self.style = QtWidgets.QApplication.style()
-        self.opt = QtWidgets.QStyleOptionSlider()
-
-    def _show_tooltip(self, val, x_offset, y_offset):
-        """Displays the tooltip over the slider handle
-
-        Kudos: https://stackoverflow.com/a/31658984/6237583
-        """
-        self.initStyleOption(self.opt)
-        handle = self.style.subControlRect(
-            QStyle.ComplexControl.CC_Slider,
-            self.opt,
-            QStyle.SubControl.SC_SliderHandle,
-        )
-
-        pos_local = handle.topLeft() + QtCore.QPoint(x_offset, y_offset)
-        pos_global = self.mapToGlobal(pos_local)
-        QtWidgets.QToolTip.showText(pos_global, str(val))
-
-    @QtCore.Slot()
-    def _handle_slider_pressed(self):
-        """Show tooltip when slider is pressed"""
-        self._show_tooltip(str(self.value()), 3, -45)
-
-    def setValue(self, value):
-        index = round((value - self._min) / self.interval)
-        return super().setValue(index)
-
-    def value(self):
-        return self.index * self.interval + self._min
-
-    @property
-    def index(self):
-        return super().value()
-
-    def setIndex(self, index):
-        return super().setValue(index)
-
-    def setMinimum(self, value):
-        self._min = value
-        self._range_adjusted()
-
-    def minimum(self):
-        return self._min
-
-    def maximum(self):
-        return self._max
-
-    def setMaximum(self, value):
-        self._max = value
-        self._range_adjusted()
-
-    def setInterval(self, value):
-        # To avoid division by zero
-        if not value:
-            raise ValueError("Interval of zero specified")
-        self.interval = value
-        self._range_adjusted()
-
-    def _range_adjusted(self):
-        number_of_steps = int((self._max - self._min) / self.interval)
-        super().setMaximum(number_of_steps)
-
-    def wheelEvent(self, event):
-        """Ignore wheel event so it gets passed to parent scroll area
-
-        If not ignored, constantly changing sliders instead of scrolling
-        """
-        event.ignore()
+    def setInterval(self, interval):
+        """Set the interval (step size)"""
+        self._interval = interval
+        # For floats, we need to scale the interval
+        scaled_step = int(interval * self._scale_factor) if isinstance(interval, float) else interval
+        super().setSingleStep(scaled_step)
+        
+    def interval(self):
+        """Get the interval (step size)"""
+        return self._interval
 
     def get_interval_fmt_str(self):
-        parts = str(self.interval).split(".")
-        if len(parts) > 1:
-            n_chars = len(parts[1])
-        else:
-            n_chars = 0
-
-        return f"0.{n_chars}f"
+        """Return formatting string based on interval precision"""
+        str_interval = str(self._interval)
+        if '.' in str_interval:
+            decimal_places = len(str_interval.split('.')[-1])
+            return f'.{decimal_places}f'
+        return '.0f'
+    
+    def _show_tooltip(self, text, duration=None, y_offset=None):
+        """Show tooltip with the current value at the slider handle position"""
+        if duration is None:
+            duration = config.get_tooltip_duration()
+        if y_offset is None:
+            y_offset = config.get_tooltip_y_offset()
+            
+        handle_pos = self.style().subControlRect(
+            QStyle.CC_Slider, 
+            self.style().CC_Slider, 
+            QStyle.SC_SliderHandle, 
+            self
+        )
+        global_pos = self.mapToGlobal(handle_pos.center())
+        QtWidgets.QToolTip.showText(
+            QtCore.QPoint(global_pos.x(), global_pos.y() + y_offset),
+            str(text),
+            self,
+            QtCore.QRect(),
+            duration
+        )
 
 
 class IntQSlider(DoubleSlider):
@@ -116,7 +66,7 @@ class IntQSlider(DoubleSlider):
         """Re-Emit the underlying value and not the index"""
         real_val = int(self.value())
         self.setToolTip(str(real_val))
-        self._show_tooltip(real_val, 3, -40)
+        self._show_tooltip(real_val)
         self.value_changed.emit(real_val)
 
 
@@ -124,6 +74,38 @@ class FloatQSlider(DoubleSlider):
     """A QSlider that will emit Floats"""
 
     value_changed = QtCore.Signal(float)
+    
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._scale_factor = config.get_float_scale_factor()
+
+    def value(self):
+        """Return the float value"""
+        return super().value() / self._scale_factor
+
+    def setValue(self, value):
+        """Set the float value by scaling it to an integer"""
+        super().setValue(int(value * self._scale_factor))
+
+    def setMinimum(self, value):
+        """Set the minimum float value by scaling it to an integer"""
+        # Convert numpy.float64 to Python float if needed
+        value = float(value)
+        super().setMinimum(int(value * self._scale_factor))
+
+    def setMaximum(self, value):
+        """Set the maximum float value by scaling it to an integer"""
+        # Convert numpy.float64 to Python float if needed
+        value = float(value)
+        super().setMaximum(int(value * self._scale_factor))
+
+    def minimum(self):
+        """Return the minimum as a float"""
+        return super().minimum() / self._scale_factor
+
+    def maximum(self):
+        """Return the maximum as a float"""
+        return super().maximum() / self._scale_factor
 
     @QtCore.Slot(int)
     def _handle_changed(self, val):
@@ -131,8 +113,8 @@ class FloatQSlider(DoubleSlider):
         real_val = float(self.value())
         fmt = self.get_interval_fmt_str()
         self.setToolTip(f"{real_val:{fmt}}")
-        self._show_tooltip(f"{real_val:{fmt}}", 3, -40)
-        self.value_changed.emit(float(self.value()))
+        self._show_tooltip(f"{real_val:{fmt}}")
+        self.value_changed.emit(real_val)
 
 
 class EditableQLabel(QtWidgets.QStackedWidget):
@@ -140,10 +122,22 @@ class EditableQLabel(QtWidgets.QStackedWidget):
 
     valueChanged = QtCore.Signal(str)
 
-    def __init__(self, txt, alignment, validator=None, width=80, parent=None):
+    def __init__(self, txt, alignment, validator=None, width=None, parent=None):
+        """
+        Initializes the custom widget with a label and a line edit.
+
+        Args:
+            txt (str): The text to display on the label.
+            alignment (Qt.Alignment): The alignment for the label and line edit.
+            validator (QValidator, optional): The validator to set on the line edit. Defaults to None.
+            width (int, optional): The fixed width of the widget. Defaults to config value.
+            parent (QtWidgets.QWidget, optional): The parent widget. Defaults to None.
+        """
         super().__init__(parent=parent)
+        if width is None:
+            width = config.get_editable_label_width()
         self.setFixedWidth(width)
-        self.setFixedHeight(20)
+        self.setFixedHeight(config.get_editable_label_height())
         self.edit = QtWidgets.QLineEdit()
         self.edit.setAlignment(alignment)
         if validator:
@@ -155,201 +149,352 @@ class EditableQLabel(QtWidgets.QStackedWidget):
         self.addWidget(self.edit)
 
     def set_validator(self, validator):
+        """
+        Set a validator for the edit widget.
+
+        Parameters:
+        validator (QValidator): The validator to be set for the edit widget.
+        """
         self.edit.setValidator(validator)
 
     def setText(self, text):
+        """
+        Set the text of the label widget.
+
+        Parameters:
+        text (str): The text to be set on the label.
+        """
         self.label.setText(text)
 
     def set_width(self, width):
+        """
+        Set the fixed width of the widget.
+
+        Parameters:
+        width (int): The width to set for the widget.
+        """
         self.setFixedWidth(width)
 
     def eventFilter(self, obj: QtWidgets.QWidget, event: QtCore.QEvent):
-        """Handle events for QLabel or QLineEdit"""
+        """
+        Filters events for the specified objects.
+
+        This method intercepts events for the given objects (label and edit) and 
+        handles them accordingly. If the event is associated with the label, it 
+        calls the `_handle_label` method. If the event is associated with the edit, 
+        it calls the `_handle_edit` method. For all other objects, it passes the 
+        event to the superclass's eventFilter method.
+
+        Args:
+            obj (QtWidgets.QWidget): The widget that received the event.
+            event (QtCore.QEvent): The event that occurred.
+
+        Returns:
+            bool: True if the event was handled, False otherwise.
+        """
+        # Safety check to prevent crashes
+        if obj is None or not isinstance(obj, QtWidgets.QWidget) or event is None:
+            return False
+            
         if obj == self.label:
-            self._handle_label(event)
+            if self._handle_label(event):
+                return True
         elif obj == self.edit:
-            self._handle_edit(event)
+            if self._handle_edit(event):
+                return True
 
         return super().eventFilter(obj, event)
 
     def _handle_label(self, event: QtCore.QEvent):
-        """Display QLineEdit if label is double clicked"""
+        """
+        Handles the label double-click event to switch to an editable text field.
+
+        Args:
+            event (QtCore.QEvent): The event object containing information about the event.
+
+        If the event is a double-click on the label, this method will:
+        - Set the text of the editable field to the current label text.
+        - Switch the current widget to the editable field.
+        - Select all text in the editable field.
+        - Set focus to the editable field.
+        
+        Returns:
+            bool: True if the event was handled, False otherwise.
+        """
         if event.type() == QtCore.QEvent.Type.MouseButtonDblClick:
             self.edit.setText(self.label.text())
             self.setCurrentWidget(self.edit)
             self.edit.selectAll()
             self.edit.setFocus()
+            return True
+        return False
 
     def _handle_edit(self, event: QtCore.QEvent):
-        """Handle closing edit box and redisplayin label"""
+        """
+        Handles edit events for the widget.
+
+        This method processes key press and focus out events to manage the 
+        transition between the edit and label widgets. It updates the label 
+        text based on the edit input and emits a valueChanged signal when 
+        the Enter key is pressed. It also handles the Escape key to revert 
+        to the label widget and manages focus out events to switch back to 
+        the label widget.
+
+        Args:
+            event (QtCore.QEvent): The event to handle.
+            
+        Returns:
+            bool: True if the event was handled, False otherwise.
+        """
         if event.type() == QtCore.QEvent.Type.KeyPress:
             key = event.key()
             if key in (QtCore.Qt.Key.Key_Return, QtCore.Qt.Key.Key_Enter):
                 if not self.edit.hasAcceptableInput():
                     self.setCurrentWidget(self.label)
-                    return
+                    return True
                 self.label.setText(self.edit.text())
                 self.setCurrentWidget(self.label)
                 self.valueChanged.emit(self.label.text())
+                return True
             if key == QtCore.Qt.Key.Key_Escape:
                 self.setCurrentWidget(self.label)
+                return True
+            return False
         elif event.type() == QtCore.QEvent.FocusOut:
             self.setCurrentWidget(self.label)
+            return True
+        return False
 
 
 class SliderContainer(QtWidgets.QWidget):
-    """Adds min/max values under slider at either end
-
-    Double clicking the endpoints turns them into a LineEdit and allows you to
-    change the min/max.
-    """
-
-    def __init__(self, slider, editable_range, parent=None, show_editable_value=True):
+    def __init__(self, slider, editable_range=True, parent=None, show_editable_value=None):
         super().__init__(parent=parent)
-        main_layout = QtWidgets.QHBoxLayout()
-        self.setLayout(main_layout)
-        main_layout.setContentsMargins(0, 0, 0, 0)
-        main_layout.setSpacing(0)
-
-        # Slider
         self.slider = slider
-        self.slider.setParent(self)
-        _min, _max = slider.minimum(), slider.maximum()
-
-        # Slider Text
-        slider_validator = self._get_validator(self.slider, _min, _max)
-        self.slider_text = EditableQLabel(
-            str(self.slider.value()),
-            width=45,
-            validator=slider_validator,
-            alignment=QtCore.Qt.AlignTop | QtCore.Qt.AlignLeft,
-        )
-        main_layout.addWidget(self.slider_text)
-        if not show_editable_value:
-            self.slider_text.setVisible(False)
-
-        # Min/Max Labels
-        self.min_label, self.max_label = self._get_minmax_labels(
-            self.slider, _min, _max, editable_range
-        )
-
-        hbox = QtWidgets.QHBoxLayout()
-        hbox.setContentsMargins(5, 0, 0, 0)
-        hbox.setSpacing(0)
-        hbox.addWidget(self.min_label)
-        hbox.addWidget(self.max_label)
-        hbox.setAlignment(self.min_label, QtCore.Qt.AlignLeft)
-        hbox.setAlignment(self.max_label, QtCore.Qt.AlignRight)
-
-        # Contains slider and min/max labeel container
-        slider_vbox = QtWidgets.QVBoxLayout()
-        slider_vbox.setContentsMargins(5, 0, 0, 0)
-        slider_vbox.addWidget(self.slider)
-        slider_vbox.addLayout(hbox)
-
-        main_layout.addLayout(slider_vbox)
-
-        # Change handlers for slider and its text box
-        self.slider.valueChanged.connect(self._handle_slider_changed)
-        self.slider_text.valueChanged.connect(self._handle_slider_text_input)
-
-    @QtCore.Slot(str)
-    def _handle_slider_text_input(self, val):
-        """Set slider to specified value"""
-        self.slider.setValue(float(val))
-
-    @QtCore.Slot(float)
-    @QtCore.Slot(int)
-    def _handle_slider_changed(self, _):
-        """Update slider text"""
-        val = self.slider.value()
-        if isinstance(val, float):
-            fmt = self.slider.get_interval_fmt_str()
-            real_val = f"{val:{fmt}}"
-        else:
-            real_val = str(val)
-        self.slider_text.setText(real_val)
-
-    def _get_minmax_labels(self, slider, bot, top, editable_range):
-        """Return either standard QLabel or EditableQLabel w/ connected slots"""
-        if not editable_range:
-            return QtWidgets.QLabel(str(bot)), QtWidgets.QLabel(str(top))
-
-        min_validator = self._get_validator(slider, -1000000000, top)
-        max_validator = self._get_validator(slider, bot, 1000000000)
-
-        min_label = EditableQLabel(
-            bot, validator=min_validator, alignment=QtCore.Qt.AlignLeft
-        )
-        max_label = EditableQLabel(
-            top, validator=max_validator, alignment=QtCore.Qt.AlignRight
-        )
-
-        min_label.valueChanged.connect(self._handle_min_changed)
-        max_label.valueChanged.connect(self._handle_max_changed)
-
-        return min_label, max_label
-
-    def _update_slider_text_validator(self):
-        """Sets the slider_text validator to current slider min/max"""
-        _min = self.slider.minimum()
-        _max = self.slider.maximum()
-        validator = self._get_validator(self.slider, _min, _max)
-        self.slider_text.set_validator(validator)
-
-    @QtCore.Slot(str)
-    def _handle_min_changed(self, value):
-        """Update slider min value and limits of max_label validator"""
-        if isinstance(self.slider, IntQSlider):
-            value = int(value)
-        elif isinstance(self.slider, FloatQSlider):
-            value = float(value)
-        validator = self._get_validator(self.slider, value, 1000000000)
-        self.max_label.set_validator(validator)
-        self.slider.setMinimum(value)
-        self._update_slider_text_validator()
-
-    @QtCore.Slot(str)
-    def _handle_max_changed(self, value):
-        """Update slider max value and limits of min_label validator"""
-        if isinstance(self.slider, IntQSlider):
-            value = int(value)
-        elif isinstance(self.slider, FloatQSlider):
-            value = float(value)
-        validator = self._get_validator(self.slider, -1000000000, value)
-        self.min_label.set_validator(validator)
-        self.slider.setMaximum(value)
-        self._update_slider_text_validator()
-
-    def _get_validator(self, slider, bot, top):
-        """Return proper validator based on slider type"""
+        self.editable_range = editable_range
+        
+        # Use config value if not explicitly provided
+        if show_editable_value is None:
+            show_editable_value = config.should_show_editable_value()
+        self.show_editable_value = show_editable_value
+        
+        layout = QtWidgets.QVBoxLayout()
+        layout.setContentsMargins(0, 0, 0, 0)
+        
+        # Top row with min/max labels and value display
+        top_layout = QtWidgets.QHBoxLayout()
+        
+        self.min_label = QtWidgets.QLabel(str(slider.minimum()))
+        if self.editable_range:
+            self.min_label.mouseDoubleClickEvent = self.edit_min_value
+        
+        self.max_label = QtWidgets.QLabel(str(slider.maximum()))
+        if self.editable_range:
+            self.max_label.mouseDoubleClickEvent = self.edit_max_value
+        
+        # Create spin box for numeric input
+        self.value_spinbox = self._create_spin_box(slider)
+        
+        top_layout.addWidget(self.min_label)
+        top_layout.addStretch()
+        top_layout.addWidget(self.value_spinbox)
+        top_layout.addStretch()
+        top_layout.addWidget(self.max_label)
+        
+        # Add slider
+        layout.addLayout(top_layout)
+        layout.addWidget(slider)
+        
+        self.setLayout(layout)
+        
+        # Connect signals
+        self.slider.valueChanged.connect(self.update_spinbox_from_slider)
+        self.value_spinbox.valueChanged.connect(self.update_slider_from_spinbox)
+    
+    def _create_spin_box(self, slider):
+        """Create appropriate spin box based on slider type"""
         if isinstance(slider, IntQSlider):
-            return QtGui.QIntValidator(bot, top)
-        elif isinstance(slider, FloatQSlider):
-            return QtGui.QDoubleValidator(bot, top, 20)
+            spinbox = QtWidgets.QSpinBox()
+        else:  # FloatQSlider
+            spinbox = QtWidgets.QDoubleSpinBox()
+            # Set decimals based on slider's interval property
+            interval = slider.interval()
+            if interval < 1:
+                decimal_places = len(str(interval).split('.')[-1])
+                spinbox.setDecimals(decimal_places)
+        
+        # Apply configuration
+        spinbox.setMinimumWidth(config.get_spinbox_min_width())
+        spinbox.setAlignment(config.get_spinbox_alignment())
+        
+        spinbox.setMinimum(slider.minimum())
+        spinbox.setMaximum(slider.maximum())
+        spinbox.setSingleStep(slider.interval())
+        spinbox.setValue(slider.value())
+        return spinbox
+    
+    def update_spinbox_from_slider(self, value):
+        """Update spinbox when slider changes"""
+        self.value_spinbox.blockSignals(True)
+        if isinstance(self.slider, FloatQSlider):
+            self.value_spinbox.setValue(value / self.slider._scale_factor)
+        else:
+            self.value_spinbox.setValue(value)
+        self.value_spinbox.blockSignals(False)
+    
+    def update_slider_from_spinbox(self, value):
+        """Update slider when spinbox changes"""
+        self.slider.blockSignals(True)
+        if isinstance(self.slider, FloatQSlider):
+            self.slider.setValue(value * self.slider._scale_factor)
+        else:
+            self.slider.setValue(value)
+        self.slider.blockSignals(False)
+        # Forward the value changed signal
+        self.slider.valueChanged.emit(value)
+    
+    def edit_min_value(self, event):
+        """Handle double-click on min label to edit minimum value"""
+        current_min = self.slider.minimum()
+        current_max = self.slider.maximum()
+        
+        # Get new value from user
+        new_value, ok = QtWidgets.QInputDialog.getDouble(
+            self,
+            "Edit Minimum Value",
+            "Enter new minimum value:",
+            current_min,
+            float('-inf'),  # No minimum limit
+            current_max,    # Maximum can't be higher than current maximum
+            config.get_decimal_places()  # Decimal places from config
+        )
+        
+        if ok:
+            # Update the slider
+            self.slider.setMinimum(new_value)
+            self.min_label.setText(str(new_value))
+            
+            # Also update the spinbox
+            self.value_spinbox.setMinimum(new_value)
+            
+            # Ensure current value isn't below new minimum
+            if self.slider.value() < new_value:
+                self.slider.setValue(new_value)
+    
+    def edit_max_value(self, event):
+        """Handle double-click on max label to edit maximum value"""
+        current_min = self.slider.minimum()
+        current_max = self.slider.maximum()
+        
+        # Get new value from user
+        new_value, ok = QtWidgets.QInputDialog.getDouble(
+            self,
+            "Edit Maximum Value",
+            "Enter new maximum value:",
+            current_max,
+            current_min,  # Minimum can't be lower than current minimum
+            float('inf'), # No maximum limit
+            config.get_decimal_places()  # Decimal places from config
+        )
+        
+        if ok:
+            # Update the slider
+            self.slider.setMaximum(new_value)
+            self.max_label.setText(str(new_value))
+            
+            # Also update the spinbox
+            self.value_spinbox.setMaximum(new_value)
+            
+            # Ensure current value isn't above new maximum
+            if self.slider.value() > new_value:
+                self.slider.setValue(new_value)
 
 
 class SliderPair(SliderContainer):
-    topChanged = QtCore.Signal((int,), (float,))
-    botChanged = QtCore.Signal((int,), (float,))
-
-    def __init__(self, top_slider, bot_slider, editable_range, parent=None):
+    """Shows min/max values and provides two text input fields for setting values"""
+    
+    # Add missing signals
+    topChanged = QtCore.Signal(int)
+    botChanged = QtCore.Signal(int)
+    
+    def __init__(self, top_slider, bot_slider, editable_range=True, parent=None):
         super().__init__(
             slider=top_slider,
             editable_range=editable_range,
             parent=parent,
-            show_editable_value=False,
+            show_editable_value=True,
         )
-        self.layout().children()[0].insertWidget(1, bot_slider)
-        top_slider.value_changed.connect(self._emit_top_changed)
-        bot_slider.value_changed.connect(self._emit_bot_changed)
-
+        
+        # Create horizontal layout for both values
+        value_layout = QtWidgets.QHBoxLayout()
+        
+        # Store bot_slider but don't show it
+        self.bot_slider = bot_slider
+        self.bot_slider.setParent(self)
+        self.bot_slider.hide()
+        
+        # Add second value input
+        validator = self._get_validator(self.bot_slider, 
+                                       self.bot_slider.minimum(), 
+                                       self.bot_slider.maximum())
+        self.bot_slider_text = EditableQLabel(
+            str(self.bot_slider.value()),
+            width=config.get_slider_pair_value_width(),  # Use config value
+            validator=validator,
+            alignment=QtCore.Qt.AlignLeft,
+        )
+        
+        # Labels for the two values
+        top_label = QtWidgets.QLabel("Value 1:")
+        bot_label = QtWidgets.QLabel("Value 2:")
+        
+        # Add to layout
+        value_layout.addWidget(top_label)
+        value_layout.addWidget(self.value_spinbox)  # Use spinbox instead of slider_text
+        value_layout.addWidget(bot_label)
+        value_layout.addWidget(self.bot_slider_text)
+        
+        # Add this layout below the range display
+        self.layout().addLayout(value_layout)
+        
+        # Connect signals
+        top_slider.valueChanged.connect(self._emit_top_changed)
+        bot_slider.valueChanged.connect(self._emit_bot_changed)
+        self.bot_slider_text.valueChanged.connect(self._handle_bot_text_input)
+        self.bot_slider.valueChanged.connect(self._handle_bot_slider_changed)
+    
+    def _get_validator(self, slider, min_value, max_value):
+        """Create appropriate validator based on slider type"""
+        if isinstance(slider, IntQSlider):
+            return QtGui.QIntValidator(min_value, max_value)
+        else:  # FloatQSlider
+            return QtGui.QDoubleValidator(min_value, max_value, slider.get_interval_fmt_str().count('f'))
+    
     @QtCore.Slot(int)
-    @QtCore.Slot(float)
     def _emit_top_changed(self, value):
+        """Emit the top slider changed signal"""
         self.topChanged.emit(value)
-
+    
     @QtCore.Slot(int)
-    @QtCore.Slot(float)
     def _emit_bot_changed(self, value):
+        """Emit the bottom slider changed signal"""
         self.botChanged.emit(value)
+    
+    @QtCore.Slot(str)
+    def _handle_bot_text_input(self, val):
+        """Set bot slider to specified value"""
+        if isinstance(self.bot_slider, FloatQSlider):
+            self.bot_slider.setValue(float(val))
+        else:
+            self.bot_slider.setValue(int(val))
+    
+    @QtCore.Slot(float)
+    @QtCore.Slot(int)
+    def _handle_bot_slider_changed(self, _):
+        """Update bot slider text"""
+        val = self.bot_slider.value()
+        if isinstance(val, float):
+            fmt = self.bot_slider.get_interval_fmt_str()
+            real_val = f"{val:{fmt}}"
+        else:
+            real_val = str(val)
+        self.bot_slider_text.setText(real_val)

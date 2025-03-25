@@ -5,9 +5,9 @@ This format is not going to be used. View model probably works better
 import logging
 
 import numpy as np
-from qtpy import QtCore, QtGui, QtWidgets
+from PySide6 import QtCore, QtGui, QtWidgets
 
-from opencv_pg.models.window import Window
+from models.window import Window
 
 from .widgets.image_viewer import ImageViewer
 from .widgets.vertical_scroll_area import VerticalScrollArea
@@ -44,9 +44,20 @@ class PipeWindow(QtWidgets.QWidget):
 
     def update_image(self, img_in, viewer):
         """Update the `viewer` with `img_in`"""
+        if img_in is None:
+            log.warning("Attempted to update viewer with None image")
+            return
+            
         q_img = self._get_qimage(img_in)
-        pixmap = QtGui.QPixmap.fromImage(q_img)
-        viewer.setPixmap(pixmap)
+        if q_img is None:
+            log.error("Failed to convert image to QImage")
+            return
+            
+        try:
+            pixmap = QtGui.QPixmap.fromImage(q_img)
+            viewer.setPixmap(pixmap)
+        except Exception as e:
+            log.error(f"Failed to update image in viewer: {e}")
 
     def _get_qimage(self, img):
         """Return a QImage appropriate for the image type
@@ -70,6 +81,7 @@ class PipeWindow(QtWidgets.QWidget):
                 "are: uint8, uint16, int32, float32, and float64.",
                 imtype,
             )
+            return None  # Add this line to handle unsupported types
 
         # Display as grayscale or BGR
         if len(img.shape) == 2:
@@ -84,17 +96,6 @@ class PipeWindow(QtWidgets.QWidget):
         self.update_image(self.window.last_out, self.viewer)
 
     def _build_layout(self):
-        """Build the Pipeline Window Layout
-
-        - QVBoxLayout (top_layou)
-          |- QSplitter (v_splitter)
-            |- ImageViewer (self.viewer)
-            |- QScrollArea (controls_scroll)
-              |- QWidget (controls_widget)
-                |- QVBoxLayout (transform_vlayout)
-                    |- Widgets (via Param.get_widget)
-                    |- ...
-        """
         top_layout = QtWidgets.QVBoxLayout()
         v_splitter = QtWidgets.QSplitter(orientation=QtCore.Qt.Vertical)
         v_splitter.splitterMoved.connect(self.handle_splitter_moved)
@@ -127,9 +128,17 @@ class PipeWindow(QtWidgets.QWidget):
                     param.set_enabled(False)
 
             transform.interconnect_widgets()
-            groupbox.toggled.connect(transform.handle_enabled_changed)
+            
+            # Check if transform has handle_enabled_changed method before connecting
+            if hasattr(transform, 'handle_enabled_changed') and callable(transform.handle_enabled_changed):
+                try:
+                    groupbox.toggled.connect(transform.handle_enabled_changed)
+                except Exception as e:
+                    log.error(f"Failed to connect toggled signal to handle_enabled_changed for {transform.__class__.__name__}: {e}")
+            else:
+                log.warning(f"Transform {transform.__class__.__name__} doesn't have handle_enabled_changed method")
 
-            # Add groupbox to tranform layout and
+            # Add groupbox to transform layout
             transform_vlayout.addWidget(groupbox)
         transform_vlayout.addStretch()
 
@@ -150,7 +159,7 @@ class WidgetGroup(QtWidgets.QGroupBox):
     def __init__(self, name, parent=None):
         super().__init__(name, parent=parent)
         self.form_layout = QtWidgets.QFormLayout()
-        self.form_layout.setVerticalSpacing(5)
+        self.form_layout.setVerticalSpacing(10)
         self.form_layout.setHorizontalSpacing(10)
         self.form_layout.setFieldGrowthPolicy(QtWidgets.QFormLayout.ExpandingFieldsGrow)
         self.setLayout(self.form_layout)
@@ -159,6 +168,7 @@ class WidgetGroup(QtWidgets.QGroupBox):
 
     def add_widget(self, widget, label, help_text=""):
         qlabel = QtWidgets.QLabel(f"{label}:")
+        qlabel.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Expanding)  # Set the size policy to allow expansion in both directions
         if help_text:
             qlabel.setToolTip(help_text)
         self.form_layout.addRow(qlabel, widget)
@@ -167,3 +177,4 @@ class WidgetGroup(QtWidgets.QGroupBox):
         """Change the label for the provided widget"""
         qlabel = self.form_layout.labelForField(widget)
         qlabel.setText(label)
+

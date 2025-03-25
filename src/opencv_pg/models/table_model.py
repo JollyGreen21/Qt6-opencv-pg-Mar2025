@@ -2,7 +2,7 @@ import logging
 
 import numpy as np
 
-from qtpy import QtCore
+from PySide6 import QtCore
 
 log = logging.getLogger(__name__)
 

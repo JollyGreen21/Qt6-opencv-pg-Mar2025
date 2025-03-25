@@ -1,16 +1,23 @@
-from opencv_pg.pipeline_launcher import launch_pipeline
+from .pipeline_launcher import launch_pipeline
 
 from jinja2 import Environment, PackageLoader, select_autoescape
 
 env = Environment(
-    loader=PackageLoader("opencv_pg", "docs/source_docs"),
+    loader=PackageLoader("docs/source_docs"),
     autoescape=select_autoescape(["html"]),
 )
 
-from opencv_pg.models.pipeline import Pipeline
-from opencv_pg.models.window import Window
-from opencv_pg.models.base_transform import BaseTransform
-from opencv_pg.models import params
-from opencv_pg.models.params import Param
-from opencv_pg.models import transforms
-from opencv_pg.models import support_transforms
+def get_env():
+    """
+    Returns the Jinja2 environment instance.
+    """
+    return env
+
+# Make all common classes available at package level with direct imports
+from .models.pipeline import Pipeline
+from .models.window import Window
+from .models.base_transform import BaseTransform
+from .models import params
+from .models.params import Param
+from .models import transforms
+from .models import support_transforms

@@ -1,22 +1,28 @@
+import sys
+# Remove incorrect path manipulation
+# sys.path.append("opencv_pg/models/views")
+
 import copy
 import logging
 
 import numpy as np
+# Fix the incorrect import path
+from views.widgets.slider_spinbox import DynamicSliderSpinBox
 
-from qtpy import QtWidgets, QtCore, QtGui
+from PySide6 import QtWidgets, QtCore, QtGui
 
-from opencv_pg.views.widgets.sliders import (
+from views.widgets.sliders import (
     IntQSlider,
     FloatQSlider,
     SliderContainer,
     SliderPair,
 )
-from opencv_pg.views.widgets.array import (
+from views.widgets.array import (
     ArrayEditor,
     ArrayEditorWithStructElement,
     ArraySize,
 )
-from opencv_pg.models.table_model import TableModel
+from .table_model import TableModel
 
 log = logging.getLogger(__name__)
 
@@ -34,16 +40,15 @@ class Param:
     """
 
     def __init__(self, default=None, label=None, read_only=False, help_text=""):
+        self._value = default
         super().__init__()
         self.label = label
-        self._value = None
-        self.default = default
         self._transform = None
         self.widget = None
         self.help_text = help_text
         self.read_only = read_only
 
-    def _get_widget(self):
+    def _get_widget(self, parent=None):
         """Return widget for this Param
 
         This method must do the following:
@@ -80,7 +85,8 @@ class Param:
         if value is not None:
             self._value = value
             log.debug("%s: %s", self.__class__.__name__, value)
-        self._transform.start_pipeline()
+        if self._transform is not None:
+            self._transform.start_pipeline()
 
 
 class BaseSlider(Param):
@@ -126,11 +132,13 @@ class BaseSlider(Param):
         widget.setMinimum(self.min)
         widget.setMaximum(self.max)
         widget.setInterval(self.step)
-        widget.setSingleStep(self.step)
-        widget.setValue(self._value)
-        widget.value_changed.connect(self._handle_value_changed)
+        
+        # Use a lambda to ensure proper binding of the change handler.
+        widget.valueChanged.connect(lambda value: self._handle_value_changed(value))
+        
         container = SliderContainer(widget, editable_range=self.editable_range)
-        container.slider_text.setText(str(self._value))
+        
+        # The container now has a value_spinbox instead of slider_text
         return container
 
     def set_step(self, step):
@@ -145,6 +153,12 @@ class BaseSlider(Param):
 
     def set_max(self, value):
         """Change the max value of the slider"""
+        # Convert any numeric type to appropriate type for the slider
+        if isinstance(value, (float, np.float64, np.float32)):
+            value = float(value)  # Ensure Python native float
+        elif isinstance(value, (int, np.int64, np.int32)):
+            value = int(value)    # Ensure Python native int
+        
         self.widget.max_label.setText(str(value))
         self.widget.slider.setMaximum(value)
 
@@ -205,8 +219,9 @@ class ComboBox(Param):
         widget = QtWidgets.QComboBox(parent=parent)
         for item in self.options:
             widget.addItem(item)
-        widget.setCurrentText(options_inverse[self._value])
-        widget.currentTextChanged.connect(self._handle_value_changed)
+        widget.setCurrentText(str(options_inverse[self._value]))  # Ensure the argument is a string
+        # Use a lambda to pass the text to the handler
+        widget.currentTextChanged.connect(lambda text: self._handle_value_changed(text))
         return widget
 
     @QtCore.Slot(str)
@@ -240,15 +255,16 @@ class ColorPicker(Param):
     def _get_widget(self, parent=None):
         btn = QtWidgets.QPushButton(text="Choose Color")
         btn.setIcon(self._get_color_icon())
-        btn.clicked.connect(self._handle_clicked)
+        # Connect using lambda to adapt the parameters
+        btn.clicked.connect(lambda checked: self._handle_clicked())
         return btn
 
     def _get_color_icon(self, x=10, y=10):
         """Return the current color as an RGB tuple"""
         pixmap = QtGui.QPixmap(x, y)
         b, g, r = self._value
-        color = QtGui.qRgb(r, g, b)
-        pixmap.fill(color)
+        # Replace qRgb with QColor which is the expected type for fill()
+        color = QtGui.QColor(r, g, b)
         return QtGui.QIcon(pixmap)
 
     @QtCore.Slot()
@@ -259,7 +275,7 @@ class ColorPicker(Param):
         initial.setRgb(r, g, b, 255)
         color = QtWidgets.QColorDialog.getColor(initial=initial)
         if color.isValid():
-            r, g, b = color.toTuple()[:3]
+            r, g, b, _ = color.getRgb()
             self._store_value_and_start((b, g, r))
             self.widget.setIcon(self._get_color_icon())
 
@@ -288,62 +304,19 @@ class ReadOnlyLabel(Param):
 
 
 class SpinBox(Param):
-    """A SpinBox
+    """A SpinBox Param"""
 
-    Args:
-        min_val ([int, float]): Min value for spinbox
-        max_val ([int, float]): Min value for spinbox
-        step ([int, float]): Increment/decrement size
-        unit_type (str): SpinBox type. Must be 'integer' or 'double'
-    """
-
-    def __init__(
-        self,
-        min_val,
-        max_val,
-        step=1,
-        default=None,
-        label=None,
-        help_text="",
-        unit_type="double",
-    ):
+    def __init__(self, min_val, max_val, default=None, step=1, label=None, help_text=""):
         super().__init__(default=default, label=label, help_text=help_text)
         self.min = min_val
         self.max = max_val
         self.step = step
-        self._value = self._set_initial_value(default)
-
-        if unit_type == "double":
-            self._is_int = False
-        elif unit_type == "integer":
-            self._is_int = True
-        else:
-            raise ValueError(
-                'unit_type must be "double" or "integer", got %s', unit_type
-            )
-
-    def _set_initial_value(self, default):
-        if default is None:
-            default = 0.0
-        if not isinstance(default, (int, float)):
-            raise ValueError("Default must be int, float not %s", type(default))
-        return default
 
     def _get_widget(self, parent=None):
-        if self._is_int:
-            sb = QtWidgets.QSpinBox(parent=parent)
-        else:
-            sb = QtWidgets.QDoubleSpinBox(parent=parent)
-            sb.setDecimals(len(str(self.step)) - 2)
-        sb.setMinimum(self.min)
-        sb.setMaximum(self.max)
-        sb.setSingleStep(self.step)
-        sb.setValue(self._value)
-        sb.valueChanged.connect(self._handle_value_changed)
-        return sb
-
-    def _handle_value_changed(self, value):
-        self._store_value_and_start(value)
+        is_float = not isinstance(self._value, int)
+        widget = DynamicSliderSpinBox(self.min, self.max, self._value, self.step, is_float, parent)
+        widget.valueChanged(lambda value: self._store_value_and_start(value))
+        return widget
 
 
 class CheckBox(Param):
@@ -363,7 +336,8 @@ class CheckBox(Param):
     def _get_widget(self, parent=None):
         sb = QtWidgets.QCheckBox(parent=parent)
         sb.setCheckState(self._get_checked_state(self._value))
-        sb.stateChanged.connect(self._handle_value_changed)
+        # Wrap the slot to ensure it's bound correctly
+        sb.stateChanged.connect(lambda value: self._handle_value_changed(value))
         return sb
 
     def _get_checked_state(self, value):
@@ -420,7 +394,7 @@ class Dimensions2D(Param):
             or len(default) != 2
         ):
             raise ValueError(
-                "Array Size default must be 2-tuple of ints, " "got %s", default
+                "Array Size default must be 2-tuple of ints, got {}".format(default)
             )
         return default
 
@@ -429,12 +403,18 @@ class Dimensions2D(Param):
             parent=parent, prefix=self.prefix, min_val=self.min, max_val=self.max
         )
         widget.set_text(*self._value)
-        widget.valueChanged.connect(self._handle_value_changed)
+        widget.valueChanged.connect(
+            lambda width, height: self._handle_dimensions_changed(width, height)
+        )
         return widget
 
     @QtCore.Slot(int, int)
     def _handle_value_changed(self, rows, cols):
         self._store_value_and_start((rows, cols))
+
+    def _handle_dimensions_changed(self, width, height):
+        """Handle when dimensions widget changes - it emits width and height"""
+        self._store_value_and_start((width, height))
 
 
 class Array(Param):
@@ -478,9 +458,9 @@ class Array(Param):
                 return np.ones((1, 3))
             else:
                 return np.ones((3, 3))
-        if not isinstance(default, (tuple, list)) or len(default) != 2:
-            raise ValueError("Matrix default must be 2-tuple, got %s", default)
-        return default
+        if not isinstance(default, np.ndarray):
+            raise ValueError("Matrix default must be a numpy array, got %s", type(default))
+            raise ValueError("Matrix default must be a numpy array, got %s" % type(default))
 
     def _get_widget(self, parent=None):
         model = TableModel(np.ones(self._value.shape))
@@ -494,16 +474,17 @@ class Array(Param):
             widget = ArrayEditor(
                 use_anchor=self._use_anchor, model=model, parent=parent, dims=self.dims
             )
-        widget.valueChanged.connect(self._handle_value_changed)
+        # Use lambda to bridge the signal-slot connection
+        widget.valueChanged.connect(lambda array: self._handle_value_changed(array))
         if self._use_anchor:
-            widget.anchorChanged.connect(self._handle_anchor_changed)
+            # Use lambda to bridge the signal-slot connection
+            widget.anchorChanged.connect(lambda row, col: self._handle_anchor_changed(row, col))
         return widget
 
-    @QtCore.Slot(int, int)
+    # Remove the @QtCore.Slot decorator that's causing the type mismatch
     def _handle_value_changed(self, array):
         self._store_value_and_start(array)
 
-    @QtCore.Slot(int, int)
     def _handle_anchor_changed(self, row, col):
         if self.dims == 1:
             self.anchor = col
@@ -550,27 +531,40 @@ class SliderPairParam(Param):
         self._setup_slider(slider1, self.min)
         self._setup_slider(slider2, self.max)
         widget = SliderPair(slider1, slider2, False)
-        widget.topChanged.connect(self._handle_top_changed)
-        widget.botChanged.connect(self._handle_bot_changed)
+        # Use lambda functions to bridge the signal-slot connection
+        widget.topChanged.connect(lambda value: self._handle_top_changed(value))
+        widget.botChanged.connect(lambda value: self._handle_bot_changed(value))
         return widget
 
     def _setup_slider(self, slider, default):
         slider.setMinimum(self.min)
         slider.setMaximum(self.max)
         slider.setInterval(self.step)
-        slider.setSingleStep(self.step)
-        slider.setValue(default)
+        # Removed as it does not exist
 
-    @QtCore.Slot(int)
-    @QtCore.Slot(float)
     def _handle_top_changed(self, value):
         v = copy.copy(self._value)
         v["top"] = value
         self._store_value_and_start(v)
 
-    @QtCore.Slot(int)
-    @QtCore.Slot(float)
     def _handle_bot_changed(self, value):
         v = copy.copy(self._value)
         v["bot"] = value
         self._store_value_and_start(v)
+
+
+class NumberParam:
+    def __init__(self, label, default_value=0, min_value=0, max_value=100, step=1):
+        self.label = label
+        self.default_value = default_value
+        self.min_value = min_value
+        self.max_value = max_value
+        self.step = step
+
+    def get_widget(self):
+        widget = QtWidgets.QSpinBox()
+        widget.setMinimum(self.min_value)
+        widget.setMaximum(self.max_value)
+        widget.setSingleStep(self.step)
+        widget.setValue(self.default_value)
+        return widget

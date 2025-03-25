@@ -1,8 +1,8 @@
 import logging
 import numpy as np
 
-from qtpy import QtWidgets, QtCore, QtGui
-from opencv_pg.models import cv2_constants as cvc
+from PySide6 import QtWidgets, QtCore, QtGui
+from models import cv2_constants as cvc
 
 import cv2
 
@@ -44,16 +44,23 @@ class TableArray(QtWidgets.QTableView):
         if not self._ctx_menu_label:
             return super().contextMenuEvent(event)
 
+        # Create the menu
         menu = QtWidgets.QMenu(self)
         anchor_action = menu.addAction(self._ctx_menu_label)
 
+        # Get position and make sure it's valid
         pos = event.pos()
-        action = menu.exec_(self.mapToGlobal(pos))
         row = self.rowAt(pos.y())
         col = self.columnAt(pos.x())
-
-        if action == anchor_action:
-            self.active_cell_changed.emit(col, row)
+        
+        # Only proceed if we have valid positions
+        if row >= 0 and col >= 0:
+            action = menu.exec_(self.mapToGlobal(pos))
+            if action == anchor_action:
+                self.active_cell_changed.emit(col, row)
+        else:
+            # Just show the menu without specific cell actions
+            menu.exec_(self.mapToGlobal(pos))
 
 
 class ArraySize(QtWidgets.QWidget):
