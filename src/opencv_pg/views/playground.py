@@ -1,7 +1,7 @@
 import logging
 import os
 try:
-    from transforms.core import basic_transforms
+    from models.transforms import BaseTransform
 except ImportError as e:
     basic_transforms = None
     print(f"Warning: Failed to import basic_transforms: {e}")
@@ -199,7 +199,7 @@ class Playground(QtWidgets.QSplitter):
 
     def _load_default_transform(self):
         try:
-            from transforms.core import basic_transforms
+            from models.transforms import BaseTransform
             default_transform = basic_transforms.GrayScale
             self._create_and_add_pipe_window(default_transform)
         except ImportError:
